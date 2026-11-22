@@ -30,16 +30,22 @@ export function importJSON(text) {
   return n;
 }
 
-/* ---------- 계정 ---------- */
+/* ---------- 계정 ----------
+   사용자는 간단한 아이디만 입력한다. 슈파베이스는 이메일 형식을 요구하므로 뒤에 고정 주소를 붙여 넘긴다.
+   (실제 메일은 오가지 않는다. 프로젝트의 'Confirm email' 설정이 꺼져 있어야 가입 즉시 로그인된다.) */
+const ID_DOMAIN = '@sini.hyunra.kr';
+const toEmail = id => id.trim().toLowerCase() + ID_DOMAIN;
+const toId = email => (email || '').replace(ID_DOMAIN, '');
+export const validId = id => /^[a-z0-9][a-z0-9._-]{2,19}$/.test(id.trim().toLowerCase());
 const configured = () => !!(CFG.url && CFG.key);
-export const syncState = () => ({ configured: configured(), email: session?.email || '', last: +localStorage.getItem(LS_LAST) || 0, error: lastError });
+export const syncState = () => ({ configured: configured(), email: toId(session?.email), last: +localStorage.getItem(LS_LAST) || 0, error: lastError });
 
 async function auth(path, body) {
   const r = await fetch(`${CFG.url}/auth/v1/${path}`, { method: 'POST', headers: { apikey: CFG.key, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) {
     const m = j.msg || j.error_description || j.message || '';
-    throw new Error(/invalid login/i.test(m) ? '이메일 또는 비밀번호가 맞지 않아요' : /already registered/i.test(m) ? '이미 가입된 이메일이에요' : /at least/i.test(m) ? '비밀번호가 너무 짧아요' : m || '요청에 실패했어요');
+    throw new Error(/invalid login/i.test(m) ? '아이디 또는 비밀번호가 맞지 않아요' : /already registered/i.test(m) ? '이미 있는 아이디예요' : /not confirmed/i.test(m) ? '아직 승인되지 않은 계정이에요' : /at least/i.test(m) ? '비밀번호가 너무 짧아요' : m || '요청에 실패했어요');
   }
   return j;
 }
@@ -49,12 +55,14 @@ function saveSession(j, email) {
   localStorage.setItem(LS_SESSION, JSON.stringify(session));
   return true;
 }
-export async function login(email, password) {
+export async function login(id, password) {
+  const email = toEmail(id);
   saveSession(await auth('token?grant_type=password', { email, password }), email);
   await sync();
   return true;
 }
-export async function signup(email, password) {
+export async function signup(id, password) {
+  const email = toEmail(id);
   const ok = saveSession(await auth('signup', { email, password }), email);  // 메일 확인이 켜져 있으면 세션이 없다
   if (ok) await sync();
   return ok;

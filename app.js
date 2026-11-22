@@ -329,9 +329,9 @@ function viewSettings() {
     : sy.email
       ? `<p><b>${esc(sy.email)}</b> 로 로그인됨</p><p><small>${sy.error ? '동기화 실패: ' + esc(sy.error) : sy.last ? '마지막 동기화 ' + new Date(sy.last).toLocaleString('ko-KR') : '동기화 대기 중'}</small></p>
          <div class="row" style="margin-top:12px"><button class="btn pri" data-act="syncNow">지금 동기화</button><button class="btn" data-act="logout">로그아웃</button></div>`
-      : `<p>아이패드와 아이폰에서 같은 계정으로 로그인하면 기록이 자동으로 맞춰져요.</p>
-         <label class="f">이메일</label><input type="email" id="email" autocomplete="username" autocapitalize="off">
-         <label class="f">비밀번호</label><input type="password" id="pw" autocomplete="current-password">
+      : `<p>아이패드와 아이폰에서 같은 아이디로 로그인하면 기록이 자동으로 맞춰져요.</p>
+         <label class="f">아이디</label><input type="text" id="email" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="영문·숫자 3~20자">
+         <label class="f">비밀번호</label><input type="password" id="pw" autocomplete="current-password" placeholder="6자 이상">
          <div class="row" style="margin-top:14px"><button class="btn pri" data-act="login">로그인</button><button class="btn" data-act="signup">계정 만들기</button></div>`;
   return `<div class="narrow-col stack"><div class="page-h" style="margin-bottom:0"><h1>설정</h1></div>
     <section class="card"><h3>기기 간 동기화</h3>${sync}</section>
@@ -457,10 +457,12 @@ function openForm(f) { S.form = f; renderForm(); const s = document.getElementBy
 function closeForm() { S.form = null; document.getElementById('sheet').close(); }
 async function authAct(mode) {
   const email = document.getElementById('email').value.trim(), pw = document.getElementById('pw').value;
-  if (!email || !pw) return toast('이메일과 비밀번호를 입력해주세요');
+  if (!email || !pw) return toast('아이디와 비밀번호를 입력해주세요');
+  if (!store.validId(email)) return toast('아이디는 영문·숫자 3~20자로 적어주세요');
+  if (pw.length < 6) return toast('비밀번호는 6자 이상이어야 해요');
   try {
     const ok = await store[mode](email, pw);
-    toast(ok ? '로그인되었어요' : '확인 메일을 보냈어요. 메일의 링크를 누른 뒤 로그인하세요');
+    toast(ok ? '로그인되었어요' : '가입은 됐지만 아직 로그인할 수 없어요. 관리자에게 알려주세요');
   } catch (err) { toast(err.message); }
   render();
 }
