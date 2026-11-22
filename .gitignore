@@ -1,0 +1,5 @@
+dist/
+.wrangler/
+wrangler.jsonc
+node_modules/
+.assetsignore
