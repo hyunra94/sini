@@ -353,3 +353,13 @@ dialog#big { width: min(1040px, calc(100vw - 16px)); max-height: calc(100dvh - 1
 .who.me h3 i { background: var(--rose); }
 .who label.f { margin: 14px 0 8px; }
 .who-none { color: var(--muted); font-size: 14px; padding: 2px 4px 6px; }
+
+/* 공유 탭: 넓은 화면에서는 화면 폭을 다 쓴다 (왼쪽 달력·요약, 오른쪽 목록) */
+.sh-page { max-width: 760px; margin: 0 auto; }
+.sh-split { display: flex; flex-direction: column; gap: 16px; }
+@media (min-width: 900px) {
+  .sh-page { max-width: none; }
+  .sh-page > .seg { max-width: 460px; }
+  .sh-split { display: grid; grid-template-columns: minmax(380px, 5fr) 7fr; gap: 28px; align-items: start; }
+  .sh-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; align-items: start; }
+}

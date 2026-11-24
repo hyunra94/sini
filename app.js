@@ -2,6 +2,7 @@ import { CFG } from './config.js';
 import * as store from './store.js';
 import { ICONS } from './icons.js';
 import * as share from './share.js';
+import * as notify from './notify.js';
 
 const { get, put, del, keys } = store;
 
@@ -398,6 +399,19 @@ function viewStats(ci) {
 }
 
 /* ---------- 화면: 설정 ---------- */
+const REMIND_TIMES = { morning: '08:00', noon: '12:30', evening: '18:30', night: '22:30' };  // 서버(plan.ts)의 기본값과 같아야 한다
+function viewNotify(st, sy) {
+  const ns = notify.state(), times = { ...REMIND_TIMES, ...(st.times || {}) };
+  const top = !sy.email ? '<p>로그인하면 약 먹을 시간에 알림을 받을 수 있어요.</p>'
+    : ns === 'on' ? `<p><b>이 기기는 알림이 켜져 있어요</b></p><div class="row" style="margin-top:12px"><button class="btn" data-act="notifyTest">시험 알림 보내기</button><button class="btn" data-act="notifyOff">끄기</button></div>`
+    : ns === 'off' ? '<p>약 먹을 시간이 됐는데 아직 체크하지 않았으면 알려 드려요.</p><div class="row" style="margin-top:12px"><button class="btn pri" data-act="notifyOn">이 기기에서 알림 켜기</button></div>'
+    : ns === 'denied' ? '<p>알림이 차단돼 있어요. 기기의 <b>설정 → 알림 → 일과기록</b>에서 허용해 주세요.</p>'
+    : '<p>이 화면에서는 알림을 켤 수 없어요. 아이폰·아이패드는 Safari 공유 버튼 → <b>홈 화면에 추가</b>한 앱에서 켤 수 있어요. (iOS 16.4 이상)</p>';
+  const tm = !sy.email ? '' : `<label class="f">알림 시각</label><div class="two">${Object.entries(SLOTS).map(([k, t]) =>
+    `<div class="row"><span style="width:64px">${t}</span><input type="time" data-rt="${k}" value="${esc(times[k])}"></div>`).join('')}</div>
+    <p style="margin-top:10px"><small>알림에는 약 이름이 나오지 않아요. 5분쯤 늦게 올 수 있고, 기기마다 따로 켜야 해요. 주사 맞는 날은 아침 시각에 알려 드려요.</small></p>`;
+  return `<section class="card"><h3>알림</h3>${top}${tm}</section>`;
+}
 function viewSettings() {
   const st = settings(), sy = store.syncState();
   const sync = !sy.configured
@@ -411,6 +425,7 @@ function viewSettings() {
          <div class="row" style="margin-top:14px"><button class="btn pri" data-act="login">로그인</button><button class="btn" data-act="signup">계정 만들기</button></div>`;
   return `<div class="narrow-col stack"><div class="page-h" style="margin-bottom:0"><h1>설정</h1></div>
     <section class="card"><h3>기기 간 동기화</h3>${sync}</section>
+    ${viewNotify(st, sy)}
     <section class="card"><h3>생리 주기 기본값</h3><div class="two">
       <div><label class="f" style="margin-top:0">주기 (일)</label><input type="number" inputmode="numeric" data-set="cycleLen" value="${esc(st.cycleLen)}"></div>
       <div><label class="f" style="margin-top:0">기간 (일)</label><input type="number" inputmode="numeric" data-set="periodLen" value="${esc(st.periodLen)}"></div>
@@ -449,7 +464,7 @@ function go(d) { S.date = d; S.month = d.slice(0, 7); }
 /* ---------- 동작 ---------- */
 const newForm = () => ({ id: null, name: '', cat: 'psych', kind: 'daily', slots: ['night'], dose: '', every: 7, active: 21, rest: 7, start: todayStr(), end: null });
 const A = {
-  tab: e => { S.tab = e.v; if (e.v === 'share') share.enter(); },
+  tab: async e => { S.tab = e.v; if (e.v === 'share') share.enter(); if (e.v === 'settings') await notify.refresh(); },
   pick: e => { go(e.d); },
   dayPrev: () => go(addDays(S.date, -1)),
   dayNext: () => go(addDays(S.date, 1)),
@@ -541,6 +556,9 @@ const A = {
   closeForm: () => closeForm(),
   login: () => authAct('login'),
   signup: () => authAct('signup'),
+  notifyOn: async () => { try { await notify.enable(); toast('알림을 켰어요. 시험 알림을 보냈어요'); } catch (err) { toast(err.message || '알림을 켜지 못했어요'); } },
+  notifyOff: async () => { await notify.disable(); toast('이 기기의 알림을 껐어요'); },
+  notifyTest: async () => { try { await notify.test(); toast('시험 알림을 보냈어요'); } catch (err) { toast(err.message); } },
   logout: () => { if (confirm('로그아웃할까요? 이 기기의 기록은 그대로 남아요.')) store.logout(); },
   syncNow: async () => { await store.sync(); const s = store.syncState(); toast(s.error ? '동기화 실패' : '동기화 완료'); },
   export: () => {
@@ -584,6 +602,7 @@ document.addEventListener('input', ev => {
   const el = ev.target;
   if (el.dataset.field) setDay(S.date, r => { if (el.value === '') delete r[el.dataset.field]; else r[el.dataset.field] = el.value; });
   else if (el.dataset.form && S.form) S.form[el.dataset.form] = el.value;
+  else if (el.dataset.rt) { if (/^\d\d:\d\d$/.test(el.value)) put('settings', { ...settings(), times: { ...(settings().times || {}), [el.dataset.rt]: el.value } }); }
   else if (el.dataset.set) { const n = parseInt(el.value, 10); if (n > 0) put('settings', { ...settings(), [el.dataset.set]: n }); }
 });
 document.addEventListener('change', async ev => {
@@ -622,5 +641,6 @@ setInterval(() => { if (document.visibilityState === 'visible') store.sync(); },
 
 render();
 store.sync();
+notify.refresh().then(changed => { if (changed && S.tab === 'settings') render(); });
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js');
 void CFG;

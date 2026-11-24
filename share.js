@@ -86,21 +86,14 @@ function viewCalSeg() {
   const wk0 = C.addDays(SH.date, -C.parse(SH.date).getDay()), wk1 = C.addDays(wk0, 6);  // 고른 날이 들어 있는 주 (일~토)
   const weekItems = SH.items.filter(it => (it.endDate || it.date) >= wk0 && it.date <= wk1).sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || '')));
   const d = C.parse(SH.date);
-  /* 사람별로 나눠 보여 준다: 나 먼저, 그다음 다른 사람. 넓은 화면은 나란히, 좁은 화면은 위아래로 */
-  const names = [...new Set([me(), ...(SH.info.people || []), ...weekItems.map(it => it.owner), ...dayItems.map(it => it.owner)].filter(Boolean))];
-  const none = t => `<p class="who-none">${t}</p>`;
-  const cols = names.map(p => {
-    const dl = dayItems.filter(it => it.owner === p), wl = weekItems.filter(it => it.owner === p);
-    return `<section class="who ${p === me() ? 'me' : 'ot'}"><h3><i></i>${C.esc(nm(p))}</h3>
-      <label class="f">${d.getMonth() + 1}월 ${d.getDate()}일 (${C.DOW[d.getDay()]})</label>${dl.length ? dl.map(it => row(it, { act: 'shEdit' })).join('') : none('이 날은 일정이 없어요')}
-      <label class="f">이 주 <small>${C.md(wk0)} ~ ${C.md(wk1)}</small></label>${wl.length ? wl.map(it => row(it, { showDate: true, act: 'shEdit' })).join('') : none('이 주는 일정이 없어요')}</section>`;
-  }).join('');
-  return `<section class="card cal open">
+  const list = (items, opt, empty) => items.length ? items.map(it => row(it, { ...opt, showOwner: true, act: 'shEdit' })).join('') : `<div class="card"><p class="empty">${empty}</p></div>`;
+  return `<div class="sh-split"><section class="card cal open">
       <div class="cal-head"><button class="icon-btn" data-act="shPrev" aria-label="이전 달">‹</button><h2>${y}년 ${m}월</h2><button class="icon-btn" data-act="shNext" aria-label="다음 달">›</button></div>
       <div class="dow">${C.DOW.map(x => `<span>${x}</span>`).join('')}</div>${weeks}
       <p class="cal-hint">분홍은 내 일정 · 초록은 다른 사람 일정</p>
     </section>
-    <div class="who-cols">${cols}</div>`;
+    <div><section><label class="f first">${d.getMonth() + 1}월 ${d.getDate()}일 (${C.DOW[d.getDay()]})</label>${list(dayItems, {}, '이 날은 일정이 없어요.')}</section>
+      <section><label class="f">이 주 일정 <small>${C.md(wk0)} ~ ${C.md(wk1)}</small></label>${list(weekItems, { showDate: true }, '이 주는 일정이 없어요.')}</section></div></div>`;
 }
 function viewMoneySeg() {
   const x = SH.exp, [y, m] = SH.month.split('-').map(Number);
@@ -113,21 +106,21 @@ function viewMoneySeg() {
       <div class="bar ${p === me() ? 'me' : ''}"><i style="width:${x.total ? paid / x.total * 100 : 0}%"></i></div></div>`;
   }).join('');
   const recs = [...(x.records || [])].sort((a, b) => b.date.localeCompare(a.date));
-  return `${nav}
+  return `<div class="sh-split"><div class="stack">${nav}
     <section class="card"><div class="sum" style="margin-bottom:14px"><div><span class="k">이번 달 합계</span><b>${won(x.total)}</b></div><div><span class="k">한 사람 몫</span><b>${won(Math.round(share))}</b></div></div>
-      ${settle}<p style="margin-top:12px"><small>똑같이 나눴을 때의 차이예요. 참고용으로만 봐 주세요.</small></p></section>
+      ${settle}<p style="margin-top:12px"><small>똑같이 나눴을 때의 차이예요. 참고용으로만 봐 주세요.</small></p></section></div>
     <section>${recs.length ? recs.map(r => `<button class="med" data-act="shEditExp" data-id="${C.esc(r.id)}"><span class="ico ${who(r)}">${C.svg('wallet')}</span>
       <span class="nm">${C.esc(r.title)}<small>${C.esc([C.md(r.date), nm(r.owner), r.category].filter(Boolean).join(' · '))}</small></span><b class="amt">${won(r.amount)}</b>${mine(r) ? '' : `<span class="lk">${C.svg('lock-simple', 'regular')}</span>`}</button>`).join('')
-      : '<div class="card"><p class="empty">이 달은 아직 기록이 없어요.</p></div>'}</section>`;
+      : '<div class="card"><p class="empty">이 달은 아직 기록이 없어요.</p></div>'}</section></div>`;
 }
 function viewAsSeg() {
   if (!SH.as) return '<div class="card"><p class="empty">불러오는 중…</p></div>';
-  return SH.as.length ? `<section>${SH.as.map(it => row(it, { showDate: true, showOwner: true, act: 'shEditAs' })).join('')}</section>`
+  return SH.as.length ? `<section class="sh-grid">${SH.as.map(it => row(it, { showDate: true, showOwner: true, act: 'shEditAs' })).join('')}</section>`
     : '<div class="card"><p class="empty">아직 하자·AS 기록이 없어요.<br>고장 난 곳이나 수리 맡긴 일을 적어 두면 같이 볼 수 있어요.</p></div>';
 }
 export function view() {
   const user = store.syncState().email, st = !user ? 'nologin' : SH.state, e = C.esc;
-  const page = (btn, body) => `<div class="narrow-col stack"><div class="page-h" style="margin-bottom:0"><h1>공유</h1>${btn}</div>${body}</div>`;
+  const page = (btn, body) => `<div class="sh-page stack"><div class="page-h" style="margin-bottom:0"><h1>공유</h1>${btn}</div>${body}</div>`;
   if (st === 'nologin') return page('', `<section class="card"><p class="empty">로그인하면 가족과 같이 쓰는<br>일정과 가계부를 볼 수 있어요.</p><button class="btn pri block" data-act="tab" data-v="settings">설정에서 로그인하기</button></section>`);
   if (st === 'unlinked') return page('', `<section class="card"><p class="empty">${e(SH.msg)}<br><small>내 아이디: ${e(user)}</small></p><button class="btn block" data-act="shReload">다시 확인</button></section>`);
   if (st === 'error') return page('', `<section class="card"><p class="empty">${e(SH.msg)}</p><button class="btn block" data-act="shReload">다시 시도</button></section>`);

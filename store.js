@@ -74,6 +74,11 @@ export async function accessToken(force) {
   if (force) saveSession(await auth('token?grant_type=refresh_token', { refresh_token: session.rt }));
   return token();
 }
+/* 로그인한 사람으로 동기화 서버를 부른다 (알림 기기 등록 등) */
+export async function server(path, init = {}) {
+  if (!configured() || !session) throw new Error('로그인이 필요해요');
+  return fetch(CFG.url + path, { ...init, headers: { apikey: CFG.key, Authorization: `Bearer ${await token()}`, 'Content-Type': 'application/json', ...(init.headers || {}) } });
+}
 async function token() {
   if (Date.now() > session.exp - 60000) saveSession(await auth('token?grant_type=refresh_token', { refresh_token: session.rt }));
   return session.at;

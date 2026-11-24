@@ -1,6 +1,6 @@
 // 오프라인에서도 열리도록 앱 파일을 캐시한다. 파일을 고치면 VERSION을 올린다.
-const VERSION = 'carelog-v20';
-const FILES = ['./', 'index.html', 'styles.css', 'app.js', 'store.js', 'share.js', 'icons.js', 'config.js', 'manifest.webmanifest', 'icon-180.png', 'icon-512.png'];
+const VERSION = 'carelog-v21';
+const FILES = ['./', 'index.html', 'styles.css', 'app.js', 'store.js', 'share.js', 'notify.js', 'icons.js', 'config.js', 'manifest.webmanifest', 'icon-180.png', 'icon-512.png'];
 
 self.addEventListener('install', e => e.waitUntil(caches.open(VERSION).then(c => c.addAll(FILES)).then(() => self.skipWaiting())));
 self.addEventListener('activate', e => e.waitUntil(
@@ -15,4 +15,15 @@ self.addEventListener('fetch', e => {
     const fresh = fetch(e.request).then(r => { if (r.ok) c.put(e.request, r.clone()); return r; }).catch(() => hit);
     return hit || fresh;
   }));
+});
+
+// 알림: 서버가 보낸 내용을 그대로 띄우고, 누르면 앱을 연다.
+self.addEventListener('push', e => {
+  let d = {};
+  try { d = e.data.json(); } catch { /* 내용 없는 알림 */ }
+  e.waitUntil(self.registration.showNotification(d.title || '일과기록', { body: d.body || '', tag: d.tag, icon: 'icon-180.png', badge: 'icon-180.png' }));
+});
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(cs => cs[0] ? cs[0].focus() : self.clients.openWindow('./')));
 });
