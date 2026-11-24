@@ -331,3 +331,16 @@ dialog#big { width: min(1040px, calc(100vw - 16px)); max-height: calc(100dvh - 1
 .cell .pd { width: 6px; height: 6px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--sage); }
 .cell .pd.on { background: var(--sage); }
 .seg button { white-space: nowrap; }
+
+/* 날짜 아래 작은 표시: 점(약·메모·체중)과 짧은 글자(생리 양·체중) */
+.cell .sub { display: flex; align-items: center; justify-content: center; gap: 3px; height: 10px; }
+.cell .sub em { font-style: normal; font-size: 10px; line-height: 1; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.cell.p-medium .sub em { color: var(--rose-ink); }
+.cell .pd.memo { box-shadow: none; background: var(--line2); }
+.cell .pd.wt { box-shadow: inset 0 0 0 1.5px var(--line2); }
+.cell.w-has .n { background: var(--soft); }
+.weight.big { margin-top: 0; }
+.weight.big input { width: 160px; font-family: var(--title); font-size: 24px; min-height: 60px; }
+/* 달력 머리줄: 동그란 버튼 안 아이콘을 한가운데로, 제목도 한가운데로 */
+.icon-btn { display: inline-flex; align-items: center; justify-content: center; }
+.cal-title { padding-left: 50px; }
