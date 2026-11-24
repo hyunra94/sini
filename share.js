@@ -117,7 +117,7 @@ function viewAsSeg() {
 }
 export function view() {
   const user = store.syncState().email, st = !user ? 'nologin' : SH.state, e = C.esc;
-  const page = (btn, body) => `<div class="narrow-col stack"><div class="page-h" style="margin-bottom:0"><h1>같이</h1>${btn}</div>${body}</div>`;
+  const page = (btn, body) => `<div class="narrow-col stack"><div class="page-h" style="margin-bottom:0"><h1>공유</h1>${btn}</div>${body}</div>`;
   if (st === 'nologin') return page('', `<section class="card"><p class="empty">로그인하면 가족과 같이 쓰는<br>일정과 가계부를 볼 수 있어요.</p><button class="btn pri block" data-act="tab" data-v="settings">설정에서 로그인하기</button></section>`);
   if (st === 'unlinked') return page('', `<section class="card"><p class="empty">${e(SH.msg)}<br><small>내 아이디: ${e(user)}</small></p><button class="btn block" data-act="shReload">다시 확인</button></section>`);
   if (st === 'error') return page('', `<section class="card"><p class="empty">${e(SH.msg)}</p><button class="btn block" data-act="shReload">다시 시도</button></section>`);

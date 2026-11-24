@@ -396,7 +396,7 @@ function viewSettings() {
 
 /* ---------- 렌더 ---------- */
 const ICON = { log: svg('cal'), meds: svg('pill'), share: svg('users'), stats: svg('chart'), settings: svg('sliders') };
-const TABS = { log: '기록', meds: '약', share: '같이', stats: '통계', settings: '설정' };
+const TABS = { log: '기록', meds: '약', share: '공유', stats: '통계', settings: '설정' };
 function render() {
   const keep = {};
   document.querySelectorAll('[data-scroll]').forEach(e => keep[e.dataset.scroll] = e.scrollTop);
