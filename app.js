@@ -30,6 +30,7 @@ const CAT_EMO = { psych: svg('pill'), supp: svg('leaf'), pill: svg('flower'), gl
 const withEmo = (map, emo) => Object.fromEntries(Object.entries(map).map(([k, v]) => [k, emo[k] + v]));
 const ico = c => `<span class="ico ${c}">${CAT_EMO[c] || CAT_EMO.psych}</span>`;
 const PERIOD = ['light', 'medium', 'heavy'];
+const FLOWS = { light: '적음', medium: '보통', heavy: '많음' };
 const DROP = '<svg viewBox="0 0 11 14"><path d="M5.5 0C5.5 0 0 6 0 9.2a5.5 4.8 0 0 0 11 0C11 6 5.5 0 5.5 0z"/></svg>';
 const SYMPTOMS = ['생리통', '두통', '요통', '유방통', '부종', '피로', '메스꺼움', '식욕 저하', '식욕 증가', '변비', '설사', '불면', '졸림', '불안', '우울', '여드름'];
 const MOODS = ['smiley-x-eyes', 'smiley-sad', 'smiley-meh', 'smiley', 'smiley-wink'].map(n => svg(n));
@@ -52,12 +53,13 @@ const shots = id => dayKeys().filter(d => day(d).taken?.[id]?.shot).map(d => ({ 
 function plan(D) {
   const out = [];
   for (const m of meds()) {
-    if (m.start && D < m.start) continue;
+    if (m.kind !== 'pack' && m.start && D < m.start) continue;
     if (m.end && D > m.end) continue;
     if (m.kind === 'daily') for (const s of Object.keys(SLOTS)) { if (m.slots?.includes(s)) out.push({ m, slot: s }); }
     else if (m.kind === 'pack') {
-      const cyc = m.active + m.rest, i = ((diff(D, m.start) % cyc) + cyc) % cyc, slot = m.slots?.[0] || 'night';
-      out.push(i < m.active ? { m, slot, note: `${i + 1}/${m.active}일차` } : { m, slot, rest: true, note: `휴약 ${i - m.active + 1}/${m.rest}일` });
+      const slot = m.slots?.[0] || 'night', p = packPos(m, D);
+      if (!p) { if (!packAnchors(m).length) out.push({ m, slot, wait: true, note: `첫 알을 체크하면 ${m.active}일 일정이 시작돼요` }); }
+      else out.push(p.i < m.active ? { m, slot, note: `${p.i + 1}/${m.active}일차` } : { m, slot, rest: true, note: `휴약 ${p.i - m.active + 1}/${m.rest}일` });
     } else if (m.kind === 'interval') {
       const all = shots(m.id), prev = all.filter(s => s.d < D).at(-1), done = day(D).taken?.[m.id]?.shot;
       const next = prev ? addDays(prev.d, m.every) : (m.start || D);
@@ -66,7 +68,30 @@ function plan(D) {
   }
   return out;
 }
-const checkable = it => (it.m.kind === 'daily' || it.m.kind === 'pack') && !it.rest;
+const checkable = it => (it.m.kind === 'daily' || it.m.kind === 'pack') && !it.rest && !it.wait;
+
+/* 피임약 팩: 첫 알을 먹은 날(기준일)부터 active일 먹고 rest일 쉰다. 기준일은 약 설정의 start와, 체크하면서 생긴 packs. */
+const packAnchors = m => [...new Set([m.start, ...(m.packs || [])].filter(Boolean))].sort();
+function packPos(m, D) {
+  const a = packAnchors(m).filter(x => x <= D).at(-1);
+  if (!a) return null;
+  const cyc = m.active + m.rest, n = diff(D, a), i = n % cyc;
+  return { i, cs: addDays(D, -i), rolled: n >= cyc };
+}
+function packAnchor(id, D) {
+  const m = get('med:' + id), lim = addDays(D, m.active), near = x => x > D && x < lim;
+  put('med:' + id, { ...m, start: m.start && near(m.start) ? null : m.start, packs: [...(m.packs || []).filter(x => x !== D && !near(x)), D].sort() });
+}
+/* 약을 체크할 때: 아직 시작 전이거나, 자동으로 넘어온 새 팩인데 앞 날짜를 하나도 안 먹었으면 이 날을 새 팩 첫 날로 삼는다 */
+function packOnTake(id, D) {
+  const m = get('med:' + id);
+  if (!m || m.kind !== 'pack') return;
+  const p = packPos(m, D);
+  if (!p) return packAnchor(id, D);
+  if (!p.rolled || p.i === 0 || p.i >= m.active) return;
+  for (let d = p.cs; d < D; d = addDays(d, 1)) if (Object.keys(day(d).taken?.[id] || {}).length) return;
+  packAnchor(id, D);
+}
 function adherence(D) {
   const items = plan(D).filter(checkable), t = day(D).taken || {};
   return { total: items.length, done: items.filter(it => t[it.m.id]?.[it.slot]).length };
@@ -74,12 +99,23 @@ function adherence(D) {
 
 /* 생리 주기 계산 */
 function cycleInfo() {
+  /* 생리 기간 = '시작'(ps)을 누른 날부터 '끝'(pe)을 누른 날까지. 끝을 아직 안 눌렀으면 오늘까지로 본다
+     (2주 넘게 안 눌렀으면 기본 기간만큼만). 양(flow)은 그 기간 안에서 날마다 따로 적는다. */
+  const st = settings(), now = todayStr(), keysAll = dayKeys(), days = new Set(), marks = [];
+  const starts = keysAll.filter(d => day(d).ps);
+  starts.forEach((s, i) => {
+    const lim = starts[i + 1] || '9999', e = keysAll.find(d => d >= s && d < lim && day(d).pe);
+    let end = e || (now < s ? s : diff(now, s) <= 13 ? now : addDays(s, st.periodLen - 1));
+    if (starts[i + 1] && end >= lim) end = addDays(lim, -1);
+    marks.push({ start: s, end, open: !e });
+    for (let d = s; d <= end; d = addDays(d, 1)) days.add(d);
+  });
   const runs = [];
-  for (const d of dayKeys().filter(d => PERIOD.includes(day(d).flow))) {
+  for (const d of [...days].sort()) {
     const last = runs.at(-1);
-    if (last && diff(d, last.start) < 10) last.end = d; else runs.push({ start: d, end: d });
+    if (last && diff(d, last.end) <= 2) last.end = d; else runs.push({ start: d, end: d });
   }
-  const st = settings(), mean = a => Math.round(a.reduce((x, y) => x + y, 0) / a.length);
+  const mean = a => Math.round(a.reduce((x, y) => x + y, 0) / a.length);
   const lens = runs.slice(1).map((r, i) => diff(r.start, runs[i].start));
   const valid = lens.filter(n => n >= 15 && n <= 60).slice(-6);
   const avg = valid.length ? mean(valid) : st.cycleLen;
@@ -88,15 +124,15 @@ function cycleInfo() {
   if (last) for (let k = 1; k <= 6; k++) for (let i = 0; i < perLen; i++) {
     const d = addDays(last.start, avg * k + i); if (d >= today) pred.add(d);
   }
-  return { runs, lens, avg, perLen, last, next, pred, measured: valid.length };
+  return { runs, lens, avg, perLen, last, next, pred, measured: valid.length, days, marks };
 }
 
 /* ---------- 화면: 달력 ---------- */
 /* 달력에 한 번에 한 가지만 보여준다: 무엇을 볼지는 위쪽 버튼으로 고른다 */
-const CAL_VIEWS = { period: '생리', meds: '약', shot: '주사', memo: '메모' };
-const CAL_HINT = { meds: '진한 초록은 다 먹은 날 · 연한 초록은 일부만' };
+const CAL_VIEWS = { period: '생리', meds: '약', pill: '피임약', shot: '주사', memo: '메모' };
+const CAL_HINT = { meds: '진한 초록은 다 먹은 날 · 연한 초록은 일부만', pill: '테두리는 먹는 날 · 채워진 날은 먹은 날 · 표시 없는 날은 쉬는 날' };
 function dayInfo(d, ci, today, shotMeds) {
-  const r = day(d), isP = PERIOD.includes(r.flow);
+  const r = day(d), isP = ci.days.has(d);
   return { r, isP, pred: !isP && ci.pred.has(d), a: d <= today ? adherence(d) : null, shot: shotMeds.some(x => r.taken?.[x.id]?.shot) };
 }
 function monthGrid(month, each) {
@@ -111,10 +147,16 @@ function monthGrid(month, each) {
   return { y, m, weeks };
 }
 function viewCal(ci) {
-  const today = todayStr(), shotMeds = meds().filter(x => x.kind === 'interval'), v = S.calView;
+  const today = todayStr(), shotMeds = meds().filter(x => x.kind === 'interval'), hasPack = meds().some(x => x.kind === 'pack' && !(x.end && x.end < today));
+  const v = S.calView === 'pill' && !hasPack ? 'period' : S.calView;
+  const pillMark = d => {
+    const it = plan(d).find(it => it.m.kind === 'pack' && !it.wait);
+    return !it || it.rest ? '' : day(d).taken?.[it.m.id]?.[it.slot] ? 'm-full' : 'k-take';
+  };
   const g = monthGrid(S.month, (d, inM) => {
     const x = dayInfo(d, ci, today, shotMeds);
-    const mark = v === 'period' ? (x.isP ? 'p-' + x.r.flow : x.r.flow === 'spot' ? 'spot' : x.pred ? 'pred' : '')
+    const mark = v === 'period' ? (x.isP ? 'p-medium' : x.pred ? 'pred' : '')
+      : v === 'pill' ? pillMark(d)
       : v === 'meds' ? (x.a && x.a.total ? (x.a.done === x.a.total ? 'm-full' : x.a.done ? 'm-part' : '') : '')
       : v === 'shot' ? (x.shot ? 'm-shot' : '') : (x.r.memo ? 'm-memo' : '');
     return `<button class="cell ${inM ? '' : 'out'} ${d === today ? 'today' : ''} ${d === S.date ? 'sel' : ''} ${mark}" data-act="pick" data-d="${d}" aria-label="${d}"><span class="n">${+d.slice(8)}</span></button>`;
@@ -126,7 +168,7 @@ function viewCal(ci) {
       <button class="icon-btn" data-act="calNext" aria-label="다음">›</button>
       <button class="icon-btn big-btn" data-act="calBig" aria-label="크게 보기">${svg('corners-out', 'regular')}</button>
     </div>
-    <div class="seg">${Object.entries(CAL_VIEWS).map(([k, t]) => `<button class="${v === k ? 'on' : ''} v-${k}" data-act="calView" data-v="${k}">${t}</button>`).join('')}</div>
+    <div class="seg">${Object.entries(CAL_VIEWS).filter(([k]) => k !== 'pill' || hasPack).map(([k, t]) => `<button class="${v === k ? 'on' : ''} v-${k}" data-act="calView" data-v="${k}">${t}</button>`).join('')}</div>
     <div class="dow">${DOW.map(d => `<span>${d}</span>`).join('')}</div>
     ${g.weeks}
     ${CAL_HINT[v] ? `<p class="cal-hint">${CAL_HINT[v]}</p>` : ''}
@@ -141,7 +183,7 @@ function renderBig() {
     if (x.shot) ic.push(`<span class="bi">${svg('syringe')}</span>`);
     if (r.mood) ic.push(`<span class="bi">${MOODS[r.mood - 1]}</span>`);
     if (r.memo) ic.push(`<span class="bi">${svg('pencil')}</span>`);
-    const p = x.isP ? 'p-' + r.flow : r.flow === 'spot' ? 'spot' : x.pred ? 'pred' : '';
+    const p = x.isP ? 'p-medium' : x.pred ? 'pred' : '';
     return `<button class="cell bc ${inM ? '' : 'out'} ${d === today ? 'today' : ''} ${d === S.date ? 'sel' : ''} ${p}" data-act="bigPick" data-d="${d}" aria-label="${d}"><span class="n">${+d.slice(8)}</span><span class="bis">${ic.join('')}</span></button>`;
   });
   document.getElementById('big').innerHTML = `<div class="bigcal">
@@ -165,7 +207,7 @@ function viewSummary(ci) {
   let cd = 0, frac = 0, text = '<p>생리 시작한 날을 기록하면<br>다음 예정일을 알려줄게요</p>';
   if (ci.last) {
     cd = diff(today, ci.last.start) + 1; frac = Math.min(1, cd / ci.avg);
-    const n = diff(ci.next, today), now = PERIOD.includes(day(today).flow);
+    const n = diff(ci.next, today), now = ci.days.has(today);
     text = `<span class="k">${now ? '지금 생리 중이에요' : '다음 생리 예정'}</span><b>${md(ci.next)}</b><small>${n === 0 ? '오늘 예정이에요' : n > 0 ? `${n}일 남았어요` : `예정일이 ${-n}일 지났어요`}</small>`;
   }
   const hero = `<section class="hero"><div class="ring"><svg viewBox="0 0 100 100"><circle class="tr" cx="50" cy="50" r="42"/>
@@ -215,7 +257,7 @@ function viewMeds(D) {
       list.map(it => {
         const on = t[it.m.id]?.[slot], sub = [it.m.dose, it.note].filter(Boolean).join(' · ');
         return it.rest
-          ? `<div class="chk rest">${ico(it.m.cat)}<span class="nm">${esc(it.m.name)}<small>${esc(it.note)}</small></span><span class="zz">쉬는 날</span></div>`
+          ? `<div class="chk rest">${ico(it.m.cat)}<span class="nm">${esc(it.m.name)}<small>${esc(it.note)}</small></span><button class="btn sm" data-act="packStart" data-med="${esc(it.m.id)}" data-slot="${slot}">새 팩 시작</button></div>`
           : `<button class="chk ${on ? 'on' : ''}" data-act="take" data-med="${esc(it.m.id)}" data-slot="${slot}" aria-pressed="${!!on}">${ico(it.m.cat)}<span class="nm">${esc(it.m.name)}${sub ? `<small>${esc(sub)}</small>` : ''}</span><span class="tm">${esc(on?.t || '')}</span><span class="box">${svg("check", "regular")}</span></button>`;
       }).join('')}</div></div>`;
   }
@@ -231,6 +273,14 @@ function viewDay(ci) {
   const rel = n === 0 ? '오늘' : n === -1 ? '어제' : n === 1 ? '내일' : n < 0 ? `${-n}일 전` : `${n}일 후`;
   const run = ci.runs.filter(x => x.start <= D).at(-1);
   const cyc = run ? `주기 ${diff(D, run.start) + 1}일차` : '';
+  const inP = ci.days.has(D), mr = ci.marks.find(x => x.start <= D && D <= x.end), prevM = ci.marks.filter(x => x.start < D).at(-1);
+  const pBtn = (act, t) => `<button class="chip" data-act="${act}">${t}</button>`;
+  const period = inP
+    ? `<div class="chips period"><span class="chip on"><span class="drops">${DROP}</span>생리 ${diff(D, run.start) + 1}일째</span>${
+        mr && (mr.open || D < mr.end) ? pBtn('pEnd', '이 날 끝났어요') : ''}${mr && !mr.open && D === mr.end ? pBtn('pEndOff', '끝 취소') : ''}${mr && D === mr.start ? pBtn('pStartOff', '시작 취소') : ''}</div>
+      <label class="f">양</label><div class="chips">${Object.entries(FLOWS).map(([k, t]) => `<button class="chip ${r.flow === k ? 'on' : ''}" data-act="flowAmt" data-v="${k}">${t}</button>`).join('')}</div>`
+    : `<div class="chips period"><button class="chip" data-act="pStart"><span class="drops">${DROP}</span>생리 시작</button>${
+        prevM && diff(D, prevM.start) <= 13 ? pBtn('pEnd', '이 날 끝났어요') : ''}</div>`;
   return `<div class="day-head">
       <button class="icon-btn" data-act="dayPrev" aria-label="전날">‹</button>
       <h1>${d.getMonth() + 1}월 ${d.getDate()}일 (${DOW[d.getDay()]})<small>${rel}${cyc ? ' · ' + cyc : ''}</small></h1>
@@ -239,9 +289,7 @@ function viewDay(ci) {
     </div>
     ${viewMeds(D)}
     <section class="card"><h3><span class="ht">${svg('heart')}몸 상태</span></h3>
-      <label class="f first">생리</label><div class="chips period">
-        <button class="chip ${PERIOD.includes(r.flow) ? 'on' : ''}" data-act="flow" aria-pressed="${PERIOD.includes(r.flow)}"><span class="drops">${DROP}</span>${PERIOD.includes(r.flow) ? '생리 중이에요' : '생리 중'}</button>
-      </div>
+      <label class="f first">생리</label>${period}
       <label class="f">기분</label><div class="chips mood">${MOODS.map((e, i) => `<button class="chip ${r.mood === i + 1 ? 'on' : ''}" data-act="mood" data-v="${i + 1}">${e}</button>`).join('')}</div>
       <label class="f">증상</label><div class="chips sym">${
         SYMPTOMS.filter(s => S.symOpen || r.symptoms?.includes(s)).map(s => `<button class="chip ${r.symptoms?.includes(s) ? 'on' : ''}" data-act="sym" data-v="${s}">${s}</button>`).join('')
@@ -279,7 +327,7 @@ function renderForm() {
     ${f.kind === 'daily' || f.kind === 'pack' ? `<label class="f">${f.kind === 'daily' ? '먹는 때 (여러 개 선택 가능)' : '먹는 때'}</label><div class="chips">${chips('fSlot', withEmo(SLOTS, SLOT_EMO), f.slots)}</div>` : ''}
     ${f.kind === 'pack' ? `<label class="f">주기</label><div class="chips">${chips('fPack', packs, `${f.active}-${f.rest}`)}</div>` : ''}
     ${f.kind === 'interval' ? `<label class="f">며칠마다</label><input type="number" inputmode="numeric" min="1" data-form="every" value="${esc(f.every)}">` : ''}
-    <label class="f">${f.kind === 'pack' ? '이번 팩 첫 알 먹은 날' : f.kind === 'interval' ? '첫 예정일' : '시작일'}</label><input type="date" data-form="start" value="${esc(f.start)}">
+    <label class="f">${f.kind === 'pack' ? '이번 팩 첫 알 먹은 날 <small>비워 두면 처음 체크한 날부터</small>' : f.kind === 'interval' ? '첫 예정일' : '시작일'}</label><input type="date" data-form="start" value="${esc(f.start)}">
     <div class="foot"><button class="btn pri" style="flex:1" data-act="saveMed">저장</button><button class="btn" data-act="closeForm">닫기</button></div>
     ${f.id ? `<div class="foot" style="margin-top:10px">${f.end ? '<button class="btn" data-act="resumeMed">다시 복용 시작</button>' : '<button class="btn" data-act="stopMed">오늘부터 중단</button>'}<button class="btn danger" data-act="delMed">삭제</button></div>` : ''}
   </div>`;
@@ -386,11 +434,19 @@ const A = {
   shotOpen: e => { S.shotOpen = e.med + S.date; },
   calPrev: () => calMove(-1),
   calNext: () => calMove(1),
-  take: e => setDay(S.date, r => {
-    const t = (r.taken ??= {}), m = (t[e.med] ??= {});
-    if (m[e.slot]) delete m[e.slot]; else m[e.slot] = { t: nowHM() };
-  }),
+  take: e => {
+    const D = S.date, on = day(D).taken?.[e.med]?.[e.slot], m = get('med:' + e.med);
+    if (!on) packOnTake(e.med, D);
+    else if (m?.kind === 'pack' && m.packs?.includes(D)) put('med:' + e.med, { ...m, packs: m.packs.filter(x => x !== D) });  // 첫 알 체크를 풀면 그 팩도 없던 일로
+    setDay(D, r => { const x = ((r.taken ??= {})[e.med] ??= {}); if (on) delete x[e.slot]; else x[e.slot] = { t: nowHM() }; });
+  },
+  packStart: e => {
+    packAnchor(e.med, S.date);
+    setDay(S.date, r => { ((r.taken ??= {})[e.med] ??= {})[e.slot] = { t: nowHM() }; });
+    toast('오늘부터 새 팩으로 계산해요');
+  },
   takeAll: e => setDay(S.date, r => {
+    for (const it of plan(S.date)) if (it.slot === e.slot && checkable(it) && !r.taken?.[it.m.id]?.[e.slot]) packOnTake(it.m.id, S.date);
     const t = (r.taken ??= {});
     for (const it of plan(S.date)) if (it.slot === e.slot && checkable(it)) (t[it.m.id] ??= {})[e.slot] ??= { t: nowHM() };
   }),
@@ -406,14 +462,28 @@ const A = {
     const m = ((r.taken ??= {})[e.med] ??= {}), n = Math.max(0, (m.prn?.n || 0) + +e.v);
     if (n) m.prn = { n, t: nowHM() }; else delete m.prn;
   }),
-  flow: () => setDay(S.date, r => { if (PERIOD.includes(r.flow)) delete r.flow; else r.flow = 'medium'; }),  // 양은 따로 기록하지 않는다
+  flowAmt: e => setDay(S.date, r => { if (r.flow === e.v) delete r.flow; else r.flow = e.v; }),
+  pStart: () => { setDay(S.date, r => { r.ps = true; delete r.pe; }); toast('끝나는 날에 "이 날 끝났어요"를 눌러주세요'); },
+  pStartOff: () => {
+    const D = S.date, mr = cycleInfo().marks.find(x => x.start === D);
+    if (mr && !mr.open && mr.end !== D) setDay(mr.end, r => { delete r.pe; });
+    setDay(D, r => { delete r.ps; delete r.pe; });
+  },
+  pEnd: () => {
+    const D = S.date, ms = cycleInfo().marks, i = ms.findLastIndex(x => x.start <= D), mr = ms[i];
+    if (!mr) return;
+    const lim = ms[i + 1]?.start || '9999';
+    for (const d of dayKeys()) if (d >= mr.start && d < lim && d !== D && day(d).pe) setDay(d, r => { delete r.pe; });
+    setDay(D, r => { r.pe = true; });
+  },
+  pEndOff: () => setDay(S.date, r => { delete r.pe; }),
   sym: e => setDay(S.date, r => { const s = new Set(r.symptoms || []); s.has(e.v) ? s.delete(e.v) : s.add(e.v); r.symptoms = [...s]; }),
   mood: e => setDay(S.date, r => { if (r.mood === +e.v) delete r.mood; else r.mood = +e.v; }),
   addMed: () => openForm(newForm()),
   editMed: e => openForm({ ...newForm(), ...get('med:' + e.med), id: e.med }),
   fCat: e => {
     const f = S.form; f.cat = e.v;
-    if (!f.id) Object.assign(f, { psych: { kind: 'daily', slots: ['night'] }, supp: { kind: 'daily', slots: ['morning'] }, pill: { kind: 'pack', slots: ['night'] },
+    if (!f.id) Object.assign(f, { psych: { kind: 'daily', slots: ['night'] }, supp: { kind: 'daily', slots: ['morning'] }, pill: { kind: 'pack', slots: ['night'], start: '' },
       glp: { kind: 'interval', every: 7, name: f.name || '마운자로' }, etc: {} }[e.v]);
   },
   fKind: e => { S.form.kind = e.v; if (e.v === 'pack' && S.form.slots.length !== 1) S.form.slots = [S.form.slots[0] || 'night']; },
@@ -428,8 +498,10 @@ const A = {
     if (!name) return toast('약 이름을 적어주세요');
     if ((f.kind === 'daily' || f.kind === 'pack') && !f.slots.length) return toast('먹는 때를 골라주세요');
     const id = f.id || Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const start = f.kind === 'pack' ? f.start || null : f.start || todayStr(), old = f.id ? get('med:' + f.id) : null;
     put('med:' + id, { name, cat: f.cat, kind: f.kind, slots: f.slots, dose: f.dose.trim(), every: Math.max(1, +f.every || 7), active: f.active, rest: f.rest,
-      start: f.start || todayStr(), end: f.end || null, order: f.order || Date.now() });
+      start, end: f.end || null, order: f.order || Date.now(),
+      packs: old && (old.start || null) === start ? old.packs || [] : [] });  // 첫 알 날짜를 직접 바꾸면 그 날짜부터 다시 센다
     closeForm();
   },
   stopMed: () => { const { id, ...m } = meds().find(m => m.id === S.form.id); put('med:' + id, { ...m, end: addDays(todayStr(), -1) }); closeForm(); toast('오늘부터 목록에서 빠져요'); },
@@ -499,6 +571,21 @@ document.addEventListener('visibilitychange', () => {
   store.sync(); render();
 });
 setInterval(() => { if (document.visibilityState === 'visible') store.sync(); }, 60000);
+
+/* 예전 방식(날마다 '생리 중'만 누름)으로 적힌 기록을 시작·끝 표시로 한 번 바꿔 준다 */
+(function migratePeriod() {
+  const all = dayKeys();
+  if (all.some(d => day(d).ps)) return;
+  const groups = [];
+  for (const d of all.filter(d => PERIOD.includes(day(d).flow))) {
+    const g = groups.at(-1);
+    if (g && diff(d, g.end) <= 2) g.end = d; else groups.push({ start: d, end: d });
+  }
+  for (const g of groups) {
+    setDay(g.start, r => { r.ps = true; });
+    if (diff(todayStr(), g.end) > 1) setDay(g.end, r => { r.pe = true; });  // 어제·오늘까지 이어진 기록은 아직 진행 중으로 둔다
+  }
+})();
 
 render();
 store.sync();

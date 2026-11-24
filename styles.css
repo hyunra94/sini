@@ -296,3 +296,8 @@ dialog#big { width: min(1040px, calc(100vw - 16px)); max-height: calc(100dvh - 1
 .cell.p-light .n, .cell.p-medium .n, .cell.p-heavy .n { background: var(--rose); color: #fff; font-weight: 500; }
 .cell.spot .n { box-shadow: none; }
 .cell.spot.sel .n { box-shadow: inset 0 0 0 1.5px var(--ink); }
+
+/* 피임약 보기: 먹을 날은 테두리만 */
+.cell.k-take .n { box-shadow: inset 0 0 0 1.5px var(--sage); color: var(--sage-ink); }
+.chips.period span.chip { cursor: default; }
+.chk.rest .btn { margin-left: auto; }
