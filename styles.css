@@ -344,3 +344,12 @@ dialog#big { width: min(1040px, calc(100vw - 16px)); max-height: calc(100dvh - 1
 /* 달력 머리줄: 동그란 버튼 안 아이콘을 한가운데로, 제목도 한가운데로 */
 .icon-btn { display: inline-flex; align-items: center; justify-content: center; }
 .cal-title { padding-left: 50px; }
+
+/* 공유 일정: 사람별 칸 */
+.who-cols { display: grid; grid-template-columns: 1fr; gap: 22px; }
+@media (min-width: 700px) { .who-cols { grid-template-columns: 1fr 1fr; gap: 18px; align-items: start; } }
+.who h3 { display: flex; align-items: center; gap: 8px; font-size: 19px; }
+.who h3 i { width: 10px; height: 10px; border-radius: 50%; background: var(--sage); }
+.who.me h3 i { background: var(--rose); }
+.who label.f { margin: 14px 0 8px; }
+.who-none { color: var(--muted); font-size: 14px; padding: 2px 4px 6px; }

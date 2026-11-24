@@ -58,12 +58,14 @@ export function enter() { load(); }
 /* ---------- 화면 ---------- */
 const won = n => (Number(n) || 0).toLocaleString('ko-KR') + '원';
 const me = () => SH.info?.me?.name || '';
+// 서버는 공유 앱 주인을 '관리자'라고 보낸다. 화면에는 주인의 이름(ownerName)으로 보여 준다. 서버로 보낼 때는 원래 값을 그대로 쓴다.
+const nm = x => x === '관리자' && SH.info?.ownerName ? SH.info.ownerName : x || '';
 const mine = it => it.owner === me() || it.author === me();
 const who = it => it.owner === me() ? 'me' : 'ot';  // 내 것은 장미색, 다른 사람 것은 초록
 const onDay = (it, d) => it.date <= d && d <= (it.endDate || it.date);
 
-function row(it, { showDate, act }) {
-  const e = C.esc, sub = [showDate ? C.md(it.date) + (it.endDate && it.endDate !== it.date ? ' ~ ' + C.md(it.endDate) : '') : '', it.time, it.owner, it.canceled ? '취소됨' : ''].filter(Boolean).join(' · ');
+function row(it, { showDate, showOwner, act }) {
+  const e = C.esc, sub = [showDate ? C.md(it.date) + (it.endDate && it.endDate !== it.date ? ' ~ ' + C.md(it.endDate) : '') : '', it.time, showOwner ? nm(it.owner) : '', it.canceled ? '취소됨' : ''].filter(Boolean).join(' · ');
   return `<button class="med ${it.canceled ? 'ended' : ''}" data-act="${act}" data-id="${e(it.id)}"><span class="ico ${who(it)}">${C.svg(it.kind === '하자·AS' ? 'wrench' : 'cal')}</span>
     <span class="nm">${e(it.title)}<small>${e(sub)}</small>${it.memo ? `<small class="memo">${e(it.memo)}</small>` : ''}</span>${mine(it) ? '' : `<span class="lk">${C.svg('lock-simple', 'regular')}</span>`}</button>`;
 }
@@ -81,16 +83,24 @@ function viewCalSeg() {
     weeks += `<div class="week cur">${cells}</div>`;
   }
   const dayItems = SH.items.filter(it => onDay(it, SH.date)).sort((a, b) => (a.time || '').localeCompare(b.time || ''));
-  const monthItems = SH.items.filter(it => (it.endDate || it.date) >= SH.month + '-01' && it.date <= SH.month + '-31').sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  const wk0 = C.addDays(SH.date, -C.parse(SH.date).getDay()), wk1 = C.addDays(wk0, 6);  // 고른 날이 들어 있는 주 (일~토)
+  const weekItems = SH.items.filter(it => (it.endDate || it.date) >= wk0 && it.date <= wk1).sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || '')));
   const d = C.parse(SH.date);
+  /* 사람별로 나눠 보여 준다: 나 먼저, 그다음 다른 사람. 넓은 화면은 나란히, 좁은 화면은 위아래로 */
+  const names = [...new Set([me(), ...(SH.info.people || []), ...weekItems.map(it => it.owner), ...dayItems.map(it => it.owner)].filter(Boolean))];
+  const none = t => `<p class="who-none">${t}</p>`;
+  const cols = names.map(p => {
+    const dl = dayItems.filter(it => it.owner === p), wl = weekItems.filter(it => it.owner === p);
+    return `<section class="who ${p === me() ? 'me' : 'ot'}"><h3><i></i>${C.esc(nm(p))}</h3>
+      <label class="f">${d.getMonth() + 1}월 ${d.getDate()}일 (${C.DOW[d.getDay()]})</label>${dl.length ? dl.map(it => row(it, { act: 'shEdit' })).join('') : none('이 날은 일정이 없어요')}
+      <label class="f">이 주 <small>${C.md(wk0)} ~ ${C.md(wk1)}</small></label>${wl.length ? wl.map(it => row(it, { showDate: true, act: 'shEdit' })).join('') : none('이 주는 일정이 없어요')}</section>`;
+  }).join('');
   return `<section class="card cal open">
       <div class="cal-head"><button class="icon-btn" data-act="shPrev" aria-label="이전 달">‹</button><h2>${y}년 ${m}월</h2><button class="icon-btn" data-act="shNext" aria-label="다음 달">›</button></div>
       <div class="dow">${C.DOW.map(x => `<span>${x}</span>`).join('')}</div>${weeks}
       <p class="cal-hint">분홍은 내 일정 · 초록은 다른 사람 일정</p>
     </section>
-    <section><label class="f">${d.getMonth() + 1}월 ${d.getDate()}일 (${C.DOW[d.getDay()]})</label>
-      ${dayItems.length ? dayItems.map(it => row(it, { act: 'shEdit' })).join('') : '<div class="card"><p class="empty">이 날은 일정이 없어요.</p></div>'}</section>
-    ${monthItems.length ? `<section><label class="f">${m}월 전체</label>${monthItems.map(it => row(it, { showDate: true, act: 'shEdit' })).join('')}</section>` : ''}`;
+    <div class="who-cols">${cols}</div>`;
 }
 function viewMoneySeg() {
   const x = SH.exp, [y, m] = SH.month.split('-').map(Number);
@@ -99,7 +109,7 @@ function viewMoneySeg() {
   const people = SH.info.people?.length ? SH.info.people : Object.keys(x.byOwner || {}), share = people.length ? x.total / people.length : 0;
   const settle = people.map(p => {
     const paid = x.byOwner?.[p] || 0, df = Math.round(paid - share);
-    return `<div class="adh"><div class="row"><b>${C.esc(p)}</b><span class="sp"></span><span>${won(paid)} <small>${!x.total || !df ? '' : df > 0 ? `${won(df)} 더 냄` : `${won(-df)} 덜 냄`}</small></span></div>
+    return `<div class="adh"><div class="row"><b>${C.esc(nm(p))}</b><span class="sp"></span><span>${won(paid)} <small>${!x.total || !df ? '' : df > 0 ? `${won(df)} 더 냄` : `${won(-df)} 덜 냄`}</small></span></div>
       <div class="bar ${p === me() ? 'me' : ''}"><i style="width:${x.total ? paid / x.total * 100 : 0}%"></i></div></div>`;
   }).join('');
   const recs = [...(x.records || [])].sort((a, b) => b.date.localeCompare(a.date));
@@ -107,12 +117,12 @@ function viewMoneySeg() {
     <section class="card"><div class="sum" style="margin-bottom:14px"><div><span class="k">이번 달 합계</span><b>${won(x.total)}</b></div><div><span class="k">한 사람 몫</span><b>${won(Math.round(share))}</b></div></div>
       ${settle}<p style="margin-top:12px"><small>똑같이 나눴을 때의 차이예요. 참고용으로만 봐 주세요.</small></p></section>
     <section>${recs.length ? recs.map(r => `<button class="med" data-act="shEditExp" data-id="${C.esc(r.id)}"><span class="ico ${who(r)}">${C.svg('wallet')}</span>
-      <span class="nm">${C.esc(r.title)}<small>${C.esc([C.md(r.date), r.owner, r.category].filter(Boolean).join(' · '))}</small></span><b class="amt">${won(r.amount)}</b>${mine(r) ? '' : `<span class="lk">${C.svg('lock-simple', 'regular')}</span>`}</button>`).join('')
+      <span class="nm">${C.esc(r.title)}<small>${C.esc([C.md(r.date), nm(r.owner), r.category].filter(Boolean).join(' · '))}</small></span><b class="amt">${won(r.amount)}</b>${mine(r) ? '' : `<span class="lk">${C.svg('lock-simple', 'regular')}</span>`}</button>`).join('')
       : '<div class="card"><p class="empty">이 달은 아직 기록이 없어요.</p></div>'}</section>`;
 }
 function viewAsSeg() {
   if (!SH.as) return '<div class="card"><p class="empty">불러오는 중…</p></div>';
-  return SH.as.length ? `<section>${SH.as.map(it => row(it, { showDate: true, act: 'shEditAs' })).join('')}</section>`
+  return SH.as.length ? `<section>${SH.as.map(it => row(it, { showDate: true, showOwner: true, act: 'shEditAs' })).join('')}</section>`
     : '<div class="card"><p class="empty">아직 하자·AS 기록이 없어요.<br>고장 난 곳이나 수리 맡긴 일을 적어 두면 같이 볼 수 있어요.</p></div>';
 }
 export function view() {
@@ -130,7 +140,7 @@ export function view() {
 /* ---------- 추가 · 수정 양식 ---------- */
 function renderSheet() {
   const f = SH.form, e = C.esc, sheet = document.getElementById('sheet');
-  const chips = (act, list, cur) => list.map(v => `<button class="chip ${cur === v ? 'on' : ''}" data-act="${act}" data-v="${e(v)}">${e(v)}</button>`).join('');
+  const chips = (act, list, cur) => list.map(v => `<button class="chip ${cur === v ? 'on' : ''}" data-act="${act}" data-v="${e(v)}">${e(nm(v))}</button>`).join('');
   const people = SH.info.people?.length ? SH.info.people : [me()];
   const body = f.type === 'e'
     ? `<label class="f">내용</label><input type="text" data-sf="title" value="${e(f.title)}" placeholder="예: 장보기, 관리비" maxlength="100">
@@ -153,7 +163,7 @@ function closeSheet() { SH.form = null; const s = document.getElementById('sheet
 function edit(list, id, type) {
   const it = (list || []).find(x => x.id === id);
   if (!it) return;
-  if (!mine(it)) return C.toast(`${it.owner || it.author || '다른 사람'} 님이 쓴 항목이라 볼 수만 있어요`);
+  if (!mine(it)) return C.toast(`${nm(it.owner || it.author) || '다른 사람'} 님이 쓴 항목이라 볼 수만 있어요`);
   openSheet(type === 'e' ? { type, id, title: it.title, date: it.date, amount: it.amount, category: it.category, owner: it.owner }
     : { type, id, title: it.title, date: it.date, time: it.time || '', endDate: it.endDate || '', kind: it.kind || '일정', memo: it.memo || '', owner: it.owner });
 }
