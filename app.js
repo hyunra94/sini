@@ -1,6 +1,7 @@
 import { CFG } from './config.js';
 import * as store from './store.js';
 import { ICONS } from './icons.js';
+import * as share from './share.js';
 
 const { get, put, del, keys } = store;
 
@@ -21,6 +22,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const SLOTS = { morning: '아침', noon: '점심', evening: '저녁', night: '자기 전' };
 const CATS = { psych: '정신과', supp: '영양제', pill: '피임약', glp: '마운자로', etc: '기타' };
 const KINDS = { daily: '매일', pack: '피임약 주기', interval: '며칠마다 (주사)', prn: '필요할 때' };
+const CAT_KINDS = { psych: ['daily', 'prn'], supp: ['daily', 'prn'], pill: ['pack', 'daily'], glp: ['interval'], etc: ['daily', 'interval', 'prn'] };  // 종류마다 쓸 수 있는 복용 방식
 /* 아이콘: Phosphor Icons 듀오톤 한 세트만 쓴다 (icons.js) */
 const ALIAS = { cal: 'calendar-blank', chart: 'chart-bar', sliders: 'sliders-horizontal', flower: 'flower-tulip', plus: 'first-aid',
   sunrise: 'sun-horizon', sunset: 'moon', moon: 'moon-stars', pencil: 'pencil-simple' };
@@ -129,8 +131,8 @@ function cycleInfo() {
 
 /* ---------- 화면: 달력 ---------- */
 /* 달력에 한 번에 한 가지만 보여준다: 무엇을 볼지는 위쪽 버튼으로 고른다 */
-const CAL_VIEWS = { period: '생리', meds: '약', pill: '피임약', shot: '주사', memo: '메모' };
-const CAL_HINT = { meds: '진한 초록은 다 먹은 날 · 연한 초록은 일부만', pill: '테두리는 먹는 날 · 채워진 날은 먹은 날 · 표시 없는 날은 쉬는 날' };
+const CAL_VIEWS = { period: '생리', meds: '약', shot: '주사', memo: '메모' };
+const CAL_HINT = { meds: '진한 초록은 다 먹은 날 · 연한 초록은 일부만', pill: '아래 점은 피임약 · 채워진 점은 먹은 날 · 빈 점은 먹을 날' };
 function dayInfo(d, ci, today, shotMeds) {
   const r = day(d), isP = ci.days.has(d);
   return { r, isP, pred: !isP && ci.pred.has(d), a: d <= today ? adherence(d) : null, shot: shotMeds.some(x => r.taken?.[x.id]?.shot) };
@@ -148,30 +150,30 @@ function monthGrid(month, each) {
 }
 function viewCal(ci) {
   const today = todayStr(), shotMeds = meds().filter(x => x.kind === 'interval'), hasPack = meds().some(x => x.kind === 'pack' && !(x.end && x.end < today));
-  const v = S.calView === 'pill' && !hasPack ? 'period' : S.calView;
-  const pillMark = d => {
-    const it = plan(d).find(it => it.m.kind === 'pack' && !it.wait);
-    return !it || it.rest ? '' : day(d).taken?.[it.m.id]?.[it.slot] ? 'm-full' : 'k-take';
+  const v = S.calView;
+  const pillDot = d => {  // 생리 보기에서 피임약은 날짜 아래 작은 점으로: 먹을 날은 빈 점, 먹은 날은 채운 점, 쉬는 날은 없음
+    const it = hasPack && v === 'period' && plan(d).find(it => it.m.kind === 'pack' && !it.wait);
+    return !it || it.rest ? '' : `<i class="pd ${day(d).taken?.[it.m.id]?.[it.slot] ? 'on' : ''}"></i>`;
   };
   const g = monthGrid(S.month, (d, inM) => {
     const x = dayInfo(d, ci, today, shotMeds);
     const mark = v === 'period' ? (x.isP ? 'p-medium' : x.pred ? 'pred' : '')
-      : v === 'pill' ? pillMark(d)
       : v === 'meds' ? (x.a && x.a.total ? (x.a.done === x.a.total ? 'm-full' : x.a.done ? 'm-part' : '') : '')
       : v === 'shot' ? (x.shot ? 'm-shot' : '') : (x.r.memo ? 'm-memo' : '');
-    return `<button class="cell ${inM ? '' : 'out'} ${d === today ? 'today' : ''} ${d === S.date ? 'sel' : ''} ${mark}" data-act="pick" data-d="${d}" aria-label="${d}"><span class="n">${+d.slice(8)}</span></button>`;
+    return `<button class="cell ${inM ? '' : 'out'} ${d === today ? 'today' : ''} ${d === S.date ? 'sel' : ''} ${mark}" data-act="pick" data-d="${d}" aria-label="${d}"><span class="n">${+d.slice(8)}</span>${pillDot(d)}</button>`;
   });
-  return `<section class="card cal">
+  return `<section class="card cal ${S.calOpen ? 'open' : ''}">
     <div class="cal-head">
       <button class="icon-btn" data-act="calPrev" aria-label="이전">‹</button>
       <button class="cal-title" data-act="calBig"><h2>${g.y}년 ${g.m}월</h2></button>
       <button class="icon-btn" data-act="calNext" aria-label="다음">›</button>
       <button class="icon-btn big-btn" data-act="calBig" aria-label="크게 보기">${svg('corners-out', 'regular')}</button>
     </div>
-    <div class="seg">${Object.entries(CAL_VIEWS).filter(([k]) => k !== 'pill' || hasPack).map(([k, t]) => `<button class="${v === k ? 'on' : ''} v-${k}" data-act="calView" data-v="${k}">${t}</button>`).join('')}</div>
+    <div class="seg">${Object.entries(CAL_VIEWS).map(([k, t]) => `<button class="${v === k ? 'on' : ''} v-${k}" data-act="calView" data-v="${k}">${k === 'period' && hasPack ? '생리·피임약' : t}</button>`).join('')}</div>
     <div class="dow">${DOW.map(d => `<span>${d}</span>`).join('')}</div>
     ${g.weeks}
-    ${CAL_HINT[v] ? `<p class="cal-hint">${CAL_HINT[v]}</p>` : ''}
+    ${CAL_HINT[v] || (v === 'period' && hasPack) ? `<p class="cal-hint">${CAL_HINT[v] || CAL_HINT.pill}</p>` : ''}
+    <button class="cal-more" data-act="calOpen" aria-expanded="${!!S.calOpen}" aria-label="${S.calOpen ? '달력 접기' : '한 달 펼치기'}"><i></i></button>
   </section>`;
 }
 /* 큰 달력: 날짜마다 그날 기록을 아이콘으로 전부 보여준다 */
@@ -318,17 +320,17 @@ function viewMedPage() {
 function renderForm() {
   const f = S.form, sheet = document.getElementById('sheet');
   const chips = (act, map, cur) => Object.entries(map).map(([k, v]) => `<button class="chip ${(Array.isArray(cur) ? cur.includes(k) : cur === k) ? 'on' : ''}" data-act="${act}" data-v="${k}">${v}</button>`).join('');
+  const kinds = [...new Set([...CAT_KINDS[f.cat], f.kind])];
   const packs = { '21-7': '21일 + 휴약 7일', '24-4': '24일 + 휴약 4일', '28-0': '28일 연속' };
-  sheet.innerHTML = `<div class="sheet"><h2>${f.id ? '약 수정' : '약 추가'}</h2>
+  sheet.innerHTML = `<div class="sheet"><div class="sheet-h"><h2>${f.id ? '약 수정' : '약 추가'}</h2><button class="icon-btn" data-act="closeForm" aria-label="닫기">${svg('x', 'regular')}</button><button class="icon-btn ok" data-act="saveMed" aria-label="저장">${svg('check', 'regular')}</button></div>
     <label class="f">종류</label><div class="chips">${chips('fCat', withEmo(CATS, CAT_EMO), f.cat)}</div>
     <label class="f">이름</label><input type="text" data-form="name" value="${esc(f.name)}" placeholder="예: 아침 약, 비타민D, 야즈">
     <label class="f">용량 · 메모 (선택)</label><input type="text" data-form="dose" value="${esc(f.dose)}" placeholder="예: 1정, 2.5mg">
-    <label class="f">복용 방식</label><div class="chips">${chips('fKind', KINDS, f.kind)}</div>
+    ${kinds.length > 1 ? `<label class="f">복용 방식</label><div class="chips">${chips('fKind', Object.fromEntries(kinds.map(k => [k, KINDS[k]])), f.kind)}</div>` : ''}
     ${f.kind === 'daily' || f.kind === 'pack' ? `<label class="f">${f.kind === 'daily' ? '먹는 때 (여러 개 선택 가능)' : '먹는 때'}</label><div class="chips">${chips('fSlot', withEmo(SLOTS, SLOT_EMO), f.slots)}</div>` : ''}
     ${f.kind === 'pack' ? `<label class="f">주기</label><div class="chips">${chips('fPack', packs, `${f.active}-${f.rest}`)}</div>` : ''}
     ${f.kind === 'interval' ? `<label class="f">며칠마다</label><input type="number" inputmode="numeric" min="1" data-form="every" value="${esc(f.every)}">` : ''}
     <label class="f">${f.kind === 'pack' ? '이번 팩 첫 알 먹은 날 <small>비워 두면 처음 체크한 날부터</small>' : f.kind === 'interval' ? '첫 예정일' : '시작일'}</label><input type="date" data-form="start" value="${esc(f.start)}">
-    <div class="foot"><button class="btn pri" style="flex:1" data-act="saveMed">저장</button><button class="btn" data-act="closeForm">닫기</button></div>
     ${f.id ? `<div class="foot" style="margin-top:10px">${f.end ? '<button class="btn" data-act="resumeMed">다시 복용 시작</button>' : '<button class="btn" data-act="stopMed">오늘부터 중단</button>'}<button class="btn danger" data-act="delMed">삭제</button></div>` : ''}
   </div>`;
 }
@@ -393,8 +395,8 @@ function viewSettings() {
 }
 
 /* ---------- 렌더 ---------- */
-const ICON = { log: svg('cal'), meds: svg('pill'), stats: svg('chart'), settings: svg('sliders') };
-const TABS = { log: '기록', meds: '약', stats: '통계', settings: '설정' };
+const ICON = { log: svg('cal'), meds: svg('pill'), share: svg('users'), stats: svg('chart'), settings: svg('sliders') };
+const TABS = { log: '기록', meds: '약', share: '같이', stats: '통계', settings: '설정' };
 function render() {
   const keep = {};
   document.querySelectorAll('[data-scroll]').forEach(e => keep[e.dataset.scroll] = e.scrollTop);
@@ -402,7 +404,7 @@ function render() {
   const nav = `<nav>${Object.entries(TABS).map(([k, v]) => `<button class="${S.tab === k ? 'on' : ''}" data-act="tab" data-v="${k}"><span class="ne">${ICON[k]}</span>${v}</button>`).join('')}</nav>`;
   const body = S.tab === 'log'
     ? `<main class="wide"><div class="split"><div class="pane" data-scroll="L">${hello()}${sm.hero}${viewCal(ci)}${sm.cards}</div><div class="pane" data-scroll="R">${viewDay(ci)}</div></div></main>`
-    : `<main data-scroll="M-${S.tab}">${S.tab === 'meds' ? viewMedPage() : S.tab === 'stats' ? viewStats(ci) : viewSettings()}</main>`;
+    : `<main data-scroll="M-${S.tab}">${S.tab === 'meds' ? viewMedPage() : S.tab === 'share' ? share.view() : S.tab === 'stats' ? viewStats(ci) : viewSettings()}</main>`;
   document.getElementById('app').innerHTML = nav + body;
   document.querySelectorAll('[data-scroll]').forEach(e => { if (keep[e.dataset.scroll]) e.scrollTop = keep[e.dataset.scroll]; });
 }
@@ -421,12 +423,13 @@ function go(d) { S.date = d; S.month = d.slice(0, 7); }
 /* ---------- 동작 ---------- */
 const newForm = () => ({ id: null, name: '', cat: 'psych', kind: 'daily', slots: ['night'], dose: '', every: 7, active: 21, rest: 7, start: todayStr(), end: null });
 const A = {
-  tab: e => { S.tab = e.v; },
+  tab: e => { S.tab = e.v; if (e.v === 'share') share.enter(); },
   pick: e => { go(e.d); },
   dayPrev: () => go(addDays(S.date, -1)),
   dayNext: () => go(addDays(S.date, 1)),
   goToday: () => go(todayStr()),
   calView: e => { S.calView = e.v; },
+  calOpen: () => { S.calOpen = !S.calOpen; },
   calBig: () => { S.big = true; renderBig(); const b = document.getElementById('big'); if (!b.open) b.showModal(); },
   closeBig: () => closeBig(),
   bigPick: e => { go(e.d); closeBig(); },
@@ -485,6 +488,8 @@ const A = {
     const f = S.form; f.cat = e.v;
     if (!f.id) Object.assign(f, { psych: { kind: 'daily', slots: ['night'] }, supp: { kind: 'daily', slots: ['morning'] }, pill: { kind: 'pack', slots: ['night'], start: '' },
       glp: { kind: 'interval', every: 7, name: f.name || '마운자로' }, etc: {} }[e.v]);
+    if (!CAT_KINDS[e.v].includes(f.kind)) f.kind = CAT_KINDS[e.v][0];
+    if (f.kind === 'pack' && f.slots.length !== 1) f.slots = [f.slots[0] || 'night'];
   },
   fKind: e => { S.form.kind = e.v; if (e.v === 'pack' && S.form.slots.length !== 1) S.form.slots = [S.form.slots[0] || 'night']; },
   fSlot: e => {
@@ -519,8 +524,10 @@ const A = {
   },
   import: () => document.getElementById('importFile').click(),
 };
+share.init({ svg, esc, toast, render, todayStr, addDays, parse, md, DOW });
+Object.assign(A, share.actions);
 function calMove(n) {
-  if (!wide.matches && !S.big) return go(addDays(S.date, n * 7));
+  if (!wide.matches && !S.big && !S.calOpen) return go(addDays(S.date, n * 7));
   const [y, m] = S.month.split('-').map(Number), d = new Date(y, m - 1 + n, 1);
   S.month = ymd(d).slice(0, 7);
 }

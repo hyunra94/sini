@@ -68,6 +68,12 @@ export async function signup(id, password) {
   return ok;
 }
 export function logout() { session = null; localStorage.removeItem(LS_SESSION); lastError = ''; }
+/* 다른 서버('같이' 탭)에 본인 확인용으로 보낼 토큰. force면 새로 받아 온다 */
+export async function accessToken(force) {
+  if (!configured() || !session) return null;
+  if (force) saveSession(await auth('token?grant_type=refresh_token', { refresh_token: session.rt }));
+  return token();
+}
 async function token() {
   if (Date.now() > session.exp - 60000) saveSession(await auth('token?grant_type=refresh_token', { refresh_token: session.rt }));
   return session.at;
