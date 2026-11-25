@@ -363,3 +363,8 @@ dialog#big { width: min(1040px, calc(100vw - 16px)); max-height: calc(100dvh - 1
   .sh-split { display: grid; grid-template-columns: minmax(380px, 5fr) 7fr; gap: 28px; align-items: start; }
   .sh-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; align-items: start; }
 }
+
+/* 생리 양: 물방울 개수 */
+.cell .sub .drops svg { width: 5px; height: 7px; }
+.chips.flow .chip { gap: 7px; }
+.chips.flow .chip:not(.on) .drops svg { fill: var(--line2); }

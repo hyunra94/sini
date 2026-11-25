@@ -33,7 +33,8 @@ const CAT_EMO = { psych: svg('pill'), supp: svg('leaf'), pill: svg('flower'), gl
 const withEmo = (map, emo) => Object.fromEntries(Object.entries(map).map(([k, v]) => [k, emo[k] + v]));
 const ico = c => `<span class="ico ${c}">${CAT_EMO[c] || CAT_EMO.psych}</span>`;
 const PERIOD = ['light', 'medium', 'heavy'];
-const FLOWS = { light: '적음', medium: '보통', heavy: '많음' };
+const FLOWS = { light: '적음', medium: '보통', heavy: '많음', vheavy: '아주 많음' };  // 양 4단계. 물방울 개수(1~4)로도 보여 준다
+const FLOW_N = { light: 1, medium: 2, heavy: 3, vheavy: 4 };
 const DROP = '<svg viewBox="0 0 11 14"><path d="M5.5 0C5.5 0 0 6 0 9.2a5.5 4.8 0 0 0 11 0C11 6 5.5 0 5.5 0z"/></svg>';
 const SYMPTOMS = ['생리통', '두통', '요통', '유방통', '부종', '피로', '메스꺼움', '식욕 저하', '식욕 증가', '변비', '설사', '불면', '졸림', '불안', '우울', '여드름'];
 const MOODS = ['smiley-x-eyes', 'smiley-sad', 'smiley-meh', 'smiley', 'smiley-wink'].map(n => svg(n));
@@ -136,7 +137,6 @@ function cycleInfo() {
 const CAL_VIEWS = { all: '전체', period: '생리', meds: '약', weight: '체중' };
 const CAL_HINT = { all: '분홍은 생리 · 초록 점은 약 · 회색 점은 메모 · 빈 점은 체중', period: '분홍 테두리는 예상일 · 아래 글자는 양',
   meds: '진한 초록은 다 챙긴 날(주사 포함) · 연한 초록은 일부만', weight: '날짜 아래 숫자가 그날 체중(kg)', pill: ' · 초록 점은 피임약(빈 점은 먹을 날)' };
-const FLOW_SHORT = { light: '적음', medium: '보통', heavy: '많음' };
 function dayInfo(d, ci, today, shotMeds) {
   const r = day(d), isP = ci.days.has(d);
   return { r, isP, pred: !isP && ci.pred.has(d), a: d <= today ? adherence(d) : null, shot: shotMeds.some(x => r.taken?.[x.id]?.shot) };
@@ -165,7 +165,7 @@ function viewCal(ci) {
   };
   const sub = (d, x) => {  // 날짜 아래 작은 표시
     const w = x.r.weight != null && x.r.weight !== '';
-    if (v === 'period') return pillDot(d) + (x.isP && FLOW_SHORT[x.r.flow] ? `<em>${FLOW_SHORT[x.r.flow]}</em>` : '');
+    if (v === 'period') return pillDot(d) + (x.isP && FLOW_N[x.r.flow] ? `<span class="drops">${DROP.repeat(FLOW_N[x.r.flow])}</span>` : '');
     if (v === 'weight') return w ? `<em>${esc(x.r.weight)}</em>` : '';
     if (v !== 'all') return '';
     const ms = medState(x);
@@ -297,12 +297,14 @@ function viewDay(ci) {
   const period = inP
     ? `<div class="chips period"><span class="chip on"><span class="drops">${DROP}</span>생리 ${diff(D, run.start) + 1}일째</span>${
         mr && (mr.open || D < mr.end) ? pBtn('pEnd', '이 날 끝났어요') : ''}${mr && !mr.open && D === mr.end ? pBtn('pEndOff', '끝 취소') : ''}${mr && D === mr.start ? pBtn('pStartOff', '시작 취소') : ''}</div>
-      <label class="f">양</label><div class="chips">${Object.entries(FLOWS).map(([k, t]) => `<button class="chip ${r.flow === k ? 'on' : ''}" data-act="flowAmt" data-v="${k}">${t}</button>`).join('')}</div>`
+`
     : `<div class="chips period"><button class="chip" data-act="pStart"><span class="drops">${DROP}</span>생리 시작</button>${
         prevM && diff(D, prevM.start) <= 13 ? pBtn('pEnd', '이 날 끝났어요') : ''}</div>`;
+  const amount = `<label class="f">양${inP ? '' : ' <small>고르면 이 날부터 생리 시작으로 적어요</small>'}</label><div class="chips flow">${Object.entries(FLOWS).map(([k, t]) =>
+    `<button class="chip ${inP && r.flow === k ? 'on' : ''}" data-act="flowAmt" data-v="${k}"><span class="drops">${DROP.repeat(FLOW_N[k])}</span>${t}</button>`).join('')}</div>`;
   const v = S.calView, wIn = `<input type="number" inputmode="decimal" step="0.1" placeholder="—" data-field="weight" value="${esc(r.weight ?? '')}">`;
   const body = `<section class="card"><h3><span class="ht">${svg('heart')}몸 상태</span></h3>
-      <label class="f first">생리</label>${period}
+      <label class="f first">생리</label>${period}${amount}
       <label class="f">기분</label><div class="chips mood">${MOODS.map((e, i) => `<button class="chip ${r.mood === i + 1 ? 'on' : ''}" data-act="mood" data-v="${i + 1}">${e}</button>`).join('')}</div>
       <label class="f">증상</label><div class="chips sym">${
         SYMPTOMS.filter(s => S.symOpen || r.symptoms?.includes(s)).map(s => `<button class="chip ${r.symptoms?.includes(s) ? 'on' : ''}" data-act="sym" data-v="${s}">${s}</button>`).join('')
@@ -506,7 +508,14 @@ const A = {
     const m = ((r.taken ??= {})[e.med] ??= {}), n = Math.max(0, (m.prn?.n || 0) + +e.v);
     if (n) m.prn = { n, t: nowHM() }; else delete m.prn;
   }),
-  flowAmt: e => setDay(S.date, r => { if (r.flow === e.v) delete r.flow; else r.flow = e.v; }),
+  flowAmt: e => {
+    const inP = cycleInfo().days.has(S.date);
+    setDay(S.date, r => {
+      if (!inP) { r.ps = true; delete r.pe; r.flow = e.v; }  // 생리 중이 아닌 날에 양을 고르면 그날을 시작일로 삼는다
+      else if (r.flow === e.v) delete r.flow; else r.flow = e.v;
+    });
+    if (!inP) toast('이 날부터 생리 시작으로 적었어요');
+  },
   pStart: () => { setDay(S.date, r => { r.ps = true; delete r.pe; }); toast('끝나는 날에 "이 날 끝났어요"를 눌러주세요'); },
   pStartOff: () => {
     const D = S.date, mr = cycleInfo().marks.find(x => x.start === D);

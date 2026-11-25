@@ -31,6 +31,24 @@ async function push(subs, msg, v) {
   }
   return sent;
 }
+/* 공유 앱 서버에서 오늘 일정을 받아 { 일과기록 아이디: { title, body } }로 만든다. 암호(BRIEFING_SECRET)가 없으면 건너뛴다 */
+const BRIEF_URL = "https://paperlog-share.hyunra94.workers.dev/api/briefing", BRIEF_MIN = 8 * 60;
+async function briefing(today) {
+  const secret = Deno.env.get("BRIEFING_SECRET");
+  if (!secret) return null;
+  const r = await fetch(`${BRIEF_URL}?date=${today}`, { headers: { "x-briefing-secret": secret } });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.ok) { console.log("briefing status", r.status); return null; }
+  const out = {};
+  for (const m of j.members || []) {
+    const list = m.schedules || [];
+    if (!m.siniId || !list.length) continue;
+    const lines = list.slice(0, 4).map((s) => `${s.time ? s.time + " " : ""}${s.title}${s.owner ? ` (${s.owner})` : ""}`);
+    if (list.length > 4) lines.push(`외 ${list.length - 4}개`);
+    out[String(m.siniId).toLowerCase()] = { title: `오늘 일정 ${list.length}개`, body: lines.join("\n") };
+  }
+  return out;
+}
 async function tick() {
   const k = new Date(Date.now() + 9 * 3600e3);  // 한국 시간
   const today = k.toISOString().slice(0, 10), nowMin = k.getUTCHours() * 60 + k.getUTCMinutes();
@@ -47,6 +65,22 @@ async function tick() {
       const { error } = await db.from("carelog_notified").insert({ user_id: uid, key: n.key });
       if (error) continue;  // 이미 보낸 알림
       sent += await push(list, { title: n.title, body: n.body, tag: n.key }, v ??= await vapid());
+    }
+  }
+  // 오전 8시 브리핑: 아직 안 받은 사람이 있을 때만 공유 앱 서버에 물어본다. 실패하면 다음 5분에 다시 해 본다
+  if (nowMin >= BRIEF_MIN && nowMin < BRIEF_MIN + 90 && Object.keys(byUser).length) {
+    const key = `${today}:brief`;
+    const { data: done } = await db.from("carelog_notified").select("user_id").eq("key", key);
+    const todo = Object.keys(byUser).filter((u) => !(done || []).some((d) => d.user_id === u));
+    const br = todo.length ? await briefing(today).catch(() => null) : null;
+    if (br) {
+      for (const uid of todo) {
+        const { data } = await db.auth.admin.getUserById(uid);
+        const id = (data?.user?.email || "").split("@")[0].toLowerCase();
+        const { error } = await db.from("carelog_notified").insert({ user_id: uid, key });
+        if (error || !br[id]) continue;  // 일정이 없는 날은 보내지 않는다
+        sent += await push(byUser[uid], { ...br[id], tag: key }, v ??= await vapid());
+      }
     }
   }
   await db.from("carelog_notified").delete().lt("at", new Date(Date.now() - 3 * 864e5).toISOString());
@@ -76,6 +110,13 @@ Deno.serve(async (req) => {
     }
     const secret = req.headers.get("x-cron-secret");
     if (!secret || secret !== await priv("cron")) return json({ ok: false, error: "forbidden" }, 403);
+    if (body.action === "briefcheck") {  // 공유 앱 서버와 암호가 맞는지만 확인한다 (일정 내용은 돌려주지 않는다)
+      const s = Deno.env.get("BRIEFING_SECRET");
+      if (!s) return json({ ok: false, error: "no secret" });
+      const r = await fetch(BRIEF_URL, { headers: { "x-briefing-secret": s } });
+      const j = await r.json().catch(() => ({}));
+      return json({ ok: r.ok && !!j.ok, status: r.status, members: (j.members || []).length });
+    }
     return json({ ok: true, ...(await tick()) });
   } catch (e) {
     console.log("error", String(e));
